@@ -1,11 +1,11 @@
-# PPTXjs 변환 도구
+# PPTX 변환 도구
 
 PowerPoint(PPTX) 파일을 HTML, PNG로 변환하는 도구입니다.
 
 ## 폴더 구조
 
 ```
-PPTXjs/
+ppt2html/
 ├── PPTXjs/              # 원본 PPTXjs 라이브러리 (https://github.com/meshesha/PPTXjs)
 │   ├── css/             # 스타일시트
 │   ├── js/              # JavaScript 파일
@@ -16,6 +16,39 @@ PPTXjs/
 │   └── package.json     # 의존성
 ├── auto-save.html       # 웹 기반 자동 저장 페이지
 └── README.md            # 이 파일
+```
+
+---
+
+## PPTXjs 설치
+
+PPTXjs 라이브러리를 프로젝트에 설치합니다.
+
+### Git Clone
+
+```bash
+cd ppt2html
+git clone https://github.com/nicholascheww/PPTXjs.git
+```
+
+### 수동 다운로드
+
+1. [PPTXjs GitHub](https://github.com/nicholascheww/PPTXjs)에서 ZIP 다운로드
+2. 압축 해제 후 `PPTXjs/` 폴더를 `ppt2html/` 디렉토리에 배치
+
+### 필수 파일 구조
+
+설치 후 다음 파일들이 있어야 합니다:
+
+```
+PPTXjs/
+├── css/
+│   └── pptxjs.css
+├── js/
+│   ├── pptxjs.js
+│   ├── divs2slides.js
+│   └── ...
+└── index.html
 ```
 
 ---
