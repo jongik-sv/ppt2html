@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>PPTXjs Auto Save</title>
+
+<link rel="stylesheet" href="./PPTXjs/css/pptxjs.css">
+<link rel="stylesheet" href="./PPTXjs/css/nv.d3.min.css">
+
+<script type="text/javascript" src="./PPTXjs/js/jquery-1.11.3.min.js"></script>
+<script type="text/javascript" src="./PPTXjs/js/jszip.min.js"></script>
+<script type="text/javascript" src="./PPTXjs/js/filereader.js"></script>
+<script type="text/javascript" src="./PPTXjs/js/d3.min.js"></script>
+<script type="text/javascript" src="./PPTXjs/js/nv.d3.min.js"></script>
+<script type="text/javascript" src="./PPTXjs/js/pptxjs.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+<style>
+    html, body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+    #warper { margin: 20px auto; width: 960px; }
+    .controls {
+        padding: 15px;
+        background: #f5f5f5;
+        border-radius: 8px;
+        margin-bottom: 20px;
+    }
+    .controls label { font-weight: bold; margin-right: 10px; }
+    #uploadFileInput { padding: 8px; }
+    #status {
+        margin-top: 15px;
+        padding: 10px;
+        border-radius: 4px;
+        display: none;
+    }
+    #status.loading { display: block; background: #fff3cd; color: #856404; }
+    #status.complete { display: block; background: #d4edda; color: #155724; }
+    #status.error { display: block; background: #f8d7da; color: #721c24; }
+    .btn {
+        display: none;
+        margin-top: 10px;
+        margin-right: 10px;
+        padding: 10px 20px;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+    #downloadBtn { background: #007bff; }
+    #downloadBtn:hover { background: #0056b3; }
+    #downloadHtmlEachBtn { background: #17a2b8; }
+    #downloadHtmlEachBtn:hover { background: #138496; }
+    #downloadPngBtn { background: #28a745; }
+    #downloadPngBtn:hover { background: #1e7e34; }
+    #downloadAllPngBtn { background: #6c757d; }
+    #downloadAllPngBtn:hover { background: #545b62; }
+    #autoSaveCheck { margin-left: 20px; }
+    #result { min-height: 400px; }
+    .slide-info { margin-top: 10px; font-size: 14px; color: #666; }
+</style>
+</head>
+<body>
+    <div id="warper">
+        <div class="controls">
+            <label>PPTX 파일 선택:</label>
+            <input id="uploadFileInput" type="file" accept=".pptx" />
+            <label id="autoSaveCheck">
+                <input type="checkbox" id="autoSave" checked /> 자동 저장
+            </label>
+            <div id="status"></div>
+            <div>
+                <button class="btn" id="downloadBtn">HTML 전체 저장</button>
+                <button class="btn" id="downloadHtmlEachBtn">HTML 개별 저장</button>
+                <button class="btn" id="downloadPngBtn">PNG 개별 저장</button>
+                <button class="btn" id="downloadAllPngBtn">PNG 전체 저장 (ZIP)</button>
+            </div>
+            <div class="slide-info" id="slideInfo"></div>
+            <div id="progress" style="margin-top:10px;display:none;">
+                <progress id="progressBar" value="0" max="100" style="width:200px;"></progress>
+                <span id="progressText"></span>
+            </div>
+        </div>
+        <div id="result"></div>
+    </div>
+
+<script>
+(function() {
+    var currentFileName = '';
+    var isConverting = false;
+    var checkInterval = null;
+
+    // pptxToHtml 초기화
+    $("#result").pptxToHtml({
+        fileInputId: "uploadFileInput",
+        slideMode: false,
+        mediaProcess: true,
+        themeProcess: true
+    });
+
+    // 파일 선택 감지
+    $('#uploadFileInput').on('change', function(e) {
+        var file = e.target.files[0];
+        if (!file) return;
+
+        currentFileName = file.name.replace('.pptx', '');
+        isConverting = true;
+
+        updateStatus('loading', '변환 중... ' + file.name);
+        $('#downloadBtn').hide();
+        $('#slideInfo').text('');
+
+        // 이전 체크 인터벌 정리
+        if (checkInterval) {
+            clearInterval(checkInterval);
+        }
+
+        // 슬라이드 로딩 완료 감지
+        checkInterval = setInterval(function() {
+            var slides = $('#result .slide');
+            var loadingMsg = $('.slides-loadnig-msg');
+
+            if (slides.length > 0) {
+                // 로딩 메시지가 없거나 100%인지 확인
+                var loadingDone = loadingMsg.length === 0 ||
+                                  loadingMsg.css('display') === 'none' ||
+                                  loadingMsg.text().indexOf('100%') !== -1;
+
+                if (loadingDone && isConverting) {
+                    clearInterval(checkInterval);
+                    checkInterval = null;
+
+                    // 렌더링 완료 대기
+                    setTimeout(function() {
+                        onConversionComplete(slides.length);
+                    }, 2000);
+                }
+            }
+        }, 500);
+
+        // 타임아웃 (2분)
+        setTimeout(function() {
+            if (isConverting) {
+                var slides = $('#result .slide');
+                if (slides.length > 0) {
+                    if (checkInterval) {
+                        clearInterval(checkInterval);
+                        checkInterval = null;
+                    }
+                    onConversionComplete(slides.length);
+                } else {
+                    updateStatus('error', '변환 실패: 슬라이드를 찾을 수 없습니다.');
+                    isConverting = false;
+                }
+            }
+        }, 120000);
+    });
+
+    // 변환 완료 처리
+    function onConversionComplete(slideCount) {
+        isConverting = false;
+        updateStatus('complete', '변환 완료! ' + slideCount + '개 슬라이드');
+        $('#slideInfo').text('파일: ' + currentFileName + '.pptx');
+        $('.btn').show();
+
+        // 자동 저장이 체크되어 있으면 자동 다운로드
+        if ($('#autoSave').is(':checked')) {
+            setTimeout(function() {
+                downloadHtml();
+            }, 500);
+        }
+    }
+
+    // 상태 업데이트
+    function updateStatus(type, message) {
+        $('#status')
+            .removeClass('loading complete error')
+            .addClass(type)
+            .text(message);
+    }
+
+    // HTML 다운로드
+    function downloadHtml() {
+        var resultHtml = $('#result').html();
+
+        // CSS 수집
+        var css = '';
+        $('link[rel="stylesheet"]').each(function() {
+            var href = $(this).attr('href');
+            if (href && (href.indexOf('pptxjs.css') !== -1 || href.indexOf('nv.d3') !== -1)) {
+                // 동기적으로 CSS 로드 (간단한 방법)
+                $.ajax({
+                    url: href,
+                    async: false,
+                    success: function(data) {
+                        css += data + '\n';
+                    }
+                });
+            }
+        });
+
+        // 인라인 스타일 수집
+        $('style').each(function() {
+            css += $(this).html() + '\n';
+        });
+
+        // 완전한 HTML 문서 생성
+        var fullHtml = '<!DOCTYPE html>\n' +
+            '<html>\n' +
+            '<head>\n' +
+            '<meta charset="utf-8">\n' +
+            '<title>' + currentFileName + '<' + '/title>\n' +
+            '<style>\n' + css + '\n' +
+            'html, body { margin: 0; padding: 20px; background: #f0f0f0; }\n' +
+            '.slide { margin: 0 auto 30px auto; }\n' +
+            '<' + '/style>\n' +
+            '<' + '/head>\n' +
+            '<body>\n' +
+            resultHtml + '\n' +
+            '<' + '/body>\n' +
+            '<' + '/html>';
+
+        // Blob 생성 및 다운로드
+        var blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = currentFileName + '.html';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        updateStatus('complete', '다운로드 완료! ' + currentFileName + '.html');
+    }
+
+    // 다운로드 버튼 클릭
+    $('#downloadBtn').on('click', function() {
+        downloadHtml();
+    });
+
+    // HTML 개별 저장
+    $('#downloadHtmlEachBtn').on('click', async function() {
+        var slides = $('#result .slide');
+        var total = slides.length;
+
+        $('#progress').show();
+        updateStatus('loading', 'HTML 개별 파일 생성 중...');
+
+        // CSS 수집
+        var css = '';
+        $('link[rel="stylesheet"]').each(function() {
+            var href = $(this).attr('href');
+            if (href && (href.indexOf('pptxjs.css') !== -1 || href.indexOf('nv.d3') !== -1)) {
+                $.ajax({
+                    url: href,
+                    async: false,
+                    success: function(data) {
+                        css += data + '\n';
+                    }
+                });
+            }
+        });
+        $('style').each(function() {
+            css += $(this).html() + '\n';
+        });
+
+        for (var i = 0; i < total; i++) {
+            $('#progressBar').val((i / total) * 100);
+            $('#progressText').text((i + 1) + ' / ' + total);
+
+            var slideHtml = slides[i].outerHTML;
+            var fullHtml = '<!DOCTYPE html>\n' +
+                '<html>\n' +
+                '<head>\n' +
+                '<meta charset="utf-8">\n' +
+                '<title>' + currentFileName + ' - Slide ' + (i + 1) + '<' + '/title>\n' +
+                '<style>\n' + css + '\n' +
+                'html, body { margin: 0; padding: 20px; background: #f0f0f0; }\n' +
+                '.slide { margin: 0 auto; }\n' +
+                '<' + '/style>\n' +
+                '<' + '/head>\n' +
+                '<body>\n' +
+                slideHtml + '\n' +
+                '<' + '/body>\n' +
+                '<' + '/html>';
+
+            var blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = currentFileName + '_slide' + (i + 1) + '.html';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            // 다운로드 간 딜레이
+            await new Promise(r => setTimeout(r, 300));
+        }
+
+        $('#progressBar').val(100);
+        $('#progressText').text('완료!');
+        updateStatus('complete', 'HTML 개별 다운로드 완료! ' + total + '개 파일');
+
+        setTimeout(function() {
+            $('#progress').hide();
+        }, 2000);
+    });
+
+    // PNG 개별 저장
+    $('#downloadPngBtn').on('click', async function() {
+        var slides = $('#result .slide');
+        var total = slides.length;
+
+        $('#progress').show();
+        updateStatus('loading', 'PNG 생성 중...');
+
+        for (var i = 0; i < total; i++) {
+            $('#progressBar').val((i / total) * 100);
+            $('#progressText').text((i + 1) + ' / ' + total);
+
+            try {
+                var canvas = await html2canvas(slides[i], {
+                    scale: 2,
+                    useCORS: true,
+                    allowTaint: true,
+                    backgroundColor: '#ffffff'
+                });
+
+                var link = document.createElement('a');
+                link.download = currentFileName + '_slide' + (i + 1) + '.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+
+                // 다운로드 간 딜레이
+                await new Promise(r => setTimeout(r, 300));
+            } catch (e) {
+                console.error('슬라이드 ' + (i + 1) + ' 캡처 실패:', e);
+            }
+        }
+
+        $('#progressBar').val(100);
+        $('#progressText').text('완료!');
+        updateStatus('complete', 'PNG 다운로드 완료! ' + total + '개 파일');
+
+        setTimeout(function() {
+            $('#progress').hide();
+        }, 2000);
+    });
+
+    // PNG 전체 저장 (ZIP)
+    $('#downloadAllPngBtn').on('click', async function() {
+        var slides = $('#result .slide');
+        var total = slides.length;
+
+        $('#progress').show();
+        updateStatus('loading', 'PNG 생성 중 (ZIP 준비)...');
+
+        // JSZip 사용 (v2 동기 API)
+        var zip = new JSZip();
+
+        for (var i = 0; i < total; i++) {
+            $('#progressBar').val((i / total) * 100);
+            $('#progressText').text((i + 1) + ' / ' + total);
+
+            try {
+                var canvas = await html2canvas(slides[i], {
+                    scale: 2,
+                    useCORS: true,
+                    allowTaint: true,
+                    backgroundColor: '#ffffff'
+                });
+
+                // Canvas to Base64
+                var dataUrl = canvas.toDataURL('image/png');
+                var base64 = dataUrl.split(',')[1];
+                zip.file('slides/' + currentFileName + '_slide' + (i + 1) + '.png', base64, {base64: true});
+            } catch (e) {
+                console.error('슬라이드 ' + (i + 1) + ' 캡처 실패:', e);
+            }
+        }
+
+        $('#progressBar').val(100);
+        $('#progressText').text('ZIP 생성 중...');
+
+        // ZIP 다운로드 (JSZip v2 동기 API 사용)
+        try {
+            var content = zip.generate({type: 'blob'});
+            var link = document.createElement('a');
+            link.download = currentFileName + '_slides.zip';
+            link.href = URL.createObjectURL(content);
+            link.click();
+            URL.revokeObjectURL(link.href);
+
+            updateStatus('complete', 'ZIP 다운로드 완료! ' + total + '개 슬라이드');
+        } catch(e) {
+            console.error('ZIP 생성 실패:', e);
+            updateStatus('error', 'ZIP 생성 실패: ' + e.message);
+        }
+        setTimeout(function() {
+            $('#progress').hide();
+        }, 2000);
+    });
+})();
+</script>
+
+</body>
+</html>
